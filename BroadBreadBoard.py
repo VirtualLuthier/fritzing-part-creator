@@ -3,90 +3,53 @@ from fritzing.FritzingParts import FritzingBreadBoard
 
 
 numPins = 63
-pinDist = 9.0	# 7.2
-centerDist = 7 * pinDist
+pinDist = 0.1	# use 2.54, if you use mm; use 0.1, if you use in(ch)
+
 width = (numPins + 3) * pinDist
-height = 21 * pinDist + centerDist
+height = 27 * pinDist
 left = pinDist
 
 ownFolder = os.path.dirname(os.path.abspath(__file__))
 fileNameRoot = 'BroadBreadBoard'
-outFolder = ownFolder + '/' + fileNameRoot
+
+if not os.path.isdir(ownFolder + '/generated'):
+	os.mkdir(ownFolder + '/generated')
+
+outFolder = ownFolder + '/generated/' + fileNameRoot
 
 mainSvgName = fileNameRoot + 'Main.svg'
 iconSvgName = fileNameRoot + 'Icon.svg'
 fzpFileName = fileNameRoot + '.fzp'
+fzpzFileName = fileNameRoot + '.fzpz'
 
-
-board = FritzingBreadBoard (outFolder, width, height, numPins, pinDist)
-
-electrodes = []
-numberingHeights = []
+board = FritzingBreadBoard ('in', outFolder, width, height, numPins, pinDist)
 
 y = pinDist
-
-electrodes.append([y, '#0000ff'])
-
-y += pinDist
-
-for name in 'ZY':
-	board.addOuterRow(name, left,  y)
-	y += pinDist
-
-electrodes.append([y, '#ff0000'])
-
-numberingHeights.append(y + pinDist)
-y += 2 * pinDist
-
-for name in 'JIHGF':
-	board.addInnerRow(name, left,  y)
-	y += pinDist
-numberingHeights.append(y)
-
-y += centerDist
-
-for name in 'EDCBA':
-	board.addInnerRow(name, left, y)
-	y += pinDist
-
-numberingHeights.append(y)
-
-y += pinDist
-
-electrodes.append([y, '#0000ff'])
-
-y += pinDist
-
-for name in 'XW':
-	board.addOuterRow(name, left,  y)
-	y += pinDist
-
-electrodes.append([y, '#ff0000'])
-
-board.m_electrodes = electrodes
-board.m_numberingHeights = numberingHeights
-
-
-#ownSvgFileName = 'testBroadBreadboard.svg'
-#fName = ownFolder + '/' + ownSvgFileName
+y = board.add2OuterRows('ZY', left, y)
+y = board.addInnerRows('JIHGF', left, y, True, True)
+y = board.add2OuterRows('XW', left, y)
+y = board.addInnerRows('EDCBA', left, y, True, True)
+board.add2OuterRows('VU', left, y)
 
 board.writeSvg(mainSvgName)
 
+# create the fzp file
 board.m_busGroups = [['A', 'B', 'C', 'D', 'E'], ['F', 'G', 'H', 'I', 'J']]
-fName = '/testBroadBreadboard.fzp.xml'
 meta = {
 	'version': 1,
-	'author': 'Rüchörd',
+	'author': 'Richard',
 	'title': 'My broad breadboard',
 	'date': '2023-02-16',
 	'label': 'Breadboard',
 	'taxonomy': 'prototyping.breadboard.breadboard.breadboard0',
-	'description': 'a broad breadboard from 2 slim ones'
+	'description': 'a broad breadboard from 2 normal ones, suitable for esp32'
 }
 tags = ['breadboard']
 properties = [['family', 'Breadboard'], ['size', 'broad']]
 viewFiles = ['icon/' + iconSvgName, 'breadboard/' + mainSvgName]
-board.createFzp('BreadBoardBroadModuleID', '0.12.34', meta, tags, properties, viewFiles)
+board.createFzp(fileNameRoot + 'ModuleID', '0.12.34', meta, tags, properties, viewFiles)
 board.writeFzp(fzpFileName)
 
-board.createIconSvg(iconSvgName)
+board.createIconSvg(iconSvgName, '--' + str(numPins) + '--')
+
+board.writeFzpz(fzpzFileName)
