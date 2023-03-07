@@ -1,48 +1,59 @@
+
+'''
+	This file tries to create a fritzing part representing an Arduino Micro according to 
+	https://docs.arduino.cc/hardware/micro
+
+	It does it by using the functionality inside of fritzing.FritzingParts
+	It creates the necessary .svg files, the .fzp file and the combination of those,
+	the .fzpf file.
+
+	I chose ArduinoMIcro, because I could not make the integrated one work on any breadboard.
+'''
+
+
+
+
 import os
 from fritzing.FritzingParts import FritzingMicroProcessor, MicroPin
 
+# prepare the output folder:
 
-#numPins = 18
-pinDist = 2.54	# use 2.54, if you use mm; use 0.1, if you use in(ch)
-
-width = 48
-height = 18
-left = pinDist
+fileNameRoot = 'ArduinoMicro_00'				# very important for all the file names!
 
 ownFolder = os.path.dirname(os.path.abspath(__file__))
-fileNameRoot = 'ArduinoMicro'
-
 if not os.path.isdir(ownFolder + '/generated'):
 	os.mkdir(ownFolder + '/generated')
 
 outFolder = ownFolder + '/generated/' + fileNameRoot
 
-mainSvgName = fileNameRoot + 'Main.svg'
-schemSvgName = fileNameRoot + 'Schem.svg'
-iconSvgName = fileNameRoot + 'Icon.svg'
-pcbSvgName = fileNameRoot + 'Pcb.svg'
-fzpFileName = fileNameRoot + '.fzp'
-fzpzFileName = fileNameRoot + '.fzpz'
+if not os.path.isdir(outFolder):
+	os.mkdir(outFolder)
 
-miPro = FritzingMicroProcessor ('mm', outFolder, width, height, pinDist)
+# the board itself:
+
+pinDist = 2.54	# use 2.54, if you use mm; use 0.1, if you use in(ch)
+width = 48
+height = 18
+
+miPro = FritzingMicroProcessor ('mm', outFolder, fileNameRoot, width, height, pinDist)
 
 lowerPins = [
-	MicroPin('~D13', 'r2'),
-	MicroPin('+3V3', 't2'),
-	MicroPin('AREF', 'l3'),
+	MicroPin('~D13', 'r2'),				# r: right on schematic
+	MicroPin('+3V3', 't2'),				# t: top on schematic
+	MicroPin('AREF', 'l3'),				# l: left on schematic
 	MicroPin('A0-D18', 'l5'),
 	MicroPin('A1-D19', 'l6'),
 	MicroPin('A2-D20', 'l7'),
 	MicroPin('A3-D21', 'l8'),
 	MicroPin('A4-D22', 'l9'),
 	MicroPin('A5-D23', 'l10'),
-	MicroPin(None),
-	MicroPin(None),
+	MicroPin(None, None),				# not used
+	MicroPin(None, None),
 	MicroPin('+5V', 't4'),
 	MicroPin('RESET', 'l2'),
-	MicroPin('GND', 'b5'),
+	MicroPin('GND', 'b5'),				# b: bottom on schematic'
 	MicroPin('VIN', 't6'),
-	MicroPin('D14-CIPO', 'r19'),					# CIPO = MISO
+	MicroPin('D14-CIPO', 'r19'),		# CIPO = MISO
 	MicroPin('D15-SCK', 'r20'),
 ]
 
@@ -58,51 +69,52 @@ upperPins = [
 	MicroPin('D4-A6', 'r11'),
 	MicroPin('~D3-SCL', 'r12'),
 	MicroPin('D2-SDA', 'r13'),
-	MicroPin('GND-2'),
-	MicroPin('RESET-2'),
+	MicroPin('GND-2', 'oGND'),			# another GND
+	MicroPin('RESET-2', 'oRESET'),		# another RESET
 	MicroPin('D0-RX', 'r15'),
 	MicroPin('D1-TX', 'r14'),
 	MicroPin('D17-SS', 'r21'),
-	MicroPin('D16-COPI', 'r18'),					# COPI = MOSI
+	MicroPin('D16-COPI', 'r18'),		# COPI = MOSI
 ]
 
 fontSize = 4
 miPro.addText(miPro.m_texts, 'ArduinoMicro', width/2, height*0.5 + fontSize*0.3, fontSize=fontSize)
+
+# the usb connector symbolically
 miPro.addRect(miPro.m_graphics, 0, 6, 5, 5, '#eeeeee')
 fontSize = 1
-miPro.addText(miPro.m_graphics, 'USB', 3, height*0.5 + fontSize*0.3, fontSize=fontSize)
+miPro.addText(miPro.m_graphics, 'USB', 3, height*0.5 + fontSize*0.3, fontSize=fontSize) # svg parent, text, x, y, fontSize
 
-miPro.addPinRow('upper', pinDist*1.5, pinDist*0.5, pinDist, 0, upperPins)
+# the 2 pin rows:
+miPro.addPinRow('upper', pinDist*1.5, pinDist*0.5, pinDist, 0, upperPins) # name, left, top, pinDistX, pinDistY, pins
 miPro.addPinRow('lower', pinDist*1.5, pinDist*6.5, pinDist, 0, lowerPins)
 
-miPro.writeSvg(mainSvgName)
+miPro.writeMainSvg()
 
-miPro.writeSchematicSvg(schemSvgName, 8, 23, 8)
+miPro.writeSchematicSvg(8, 23, 8)		# width, height in pin steps, outer in mm or in
 
-miPro.writePcbSvg(pcbSvgName)
+miPro.writePcbSvg()
 
+# create the icon svg file:
 iconRoot = miPro.createIconRootNode()
 fontSize = 4
-miPro.addText(iconRoot, 'ArduinoMicro', 16, 16 + fontSize*0.3, fontSize=fontSize)
-miPro.writeOutIconFile(iconRoot, iconSvgName)
+miPro.addText(iconRoot, 'ArduinoMicro', 16, 16 + fontSize*0.3, fontSize=fontSize) # svg parent, text, x, y, fontSize
+miPro.writeOutIconFile()
 
-# create the fzp file
-# board.m_busGroups = [['A', 'B', 'C', 'D', 'E'], ['F', 'G', 'H', 'I', 'J']]
-# meta = {
-# 	'version': 1,
-# 	'author': 'Richard',
-# 	'title': 'My broad breadboard',
-# 	'date': '2023-02-16',
-# 	'label': 'Breadboard',
-# 	'taxonomy': 'prototyping.breadboard.breadboard.breadboard0',
-# 	'description': 'a broad breadboard from 2 normal ones, suitable for esp32'
-# }
-# tags = ['breadboard']
-# properties = [['family', 'Breadboard'], ['size', 'broad']]
-# viewFiles = ['icon/' + iconSvgName, 'breadboard/' + mainSvgName]
-# board.createFzp(fileNameRoot + 'ModuleID', '0.12.34', meta, tags, properties, viewFiles)
-# board.writeFzp(fzpFileName)
+# create the fzp file:
 
-# board.createIconSvg(iconSvgName, '--' + str(numPins) + '--')
+meta = {
+	'version': 1,
+	'author': 'Richard',
+	'title': 'Arduino Micro',
+	'date': '2023-03-04',
+	'label': 'ArduinoMicro',
+	'description': 'a simple arduino micro according to https://docs.arduino.cc/hardware/micro'
+}
+tags = ['ArduinoMicro']
+properties = [['family', 'ArduinoMicro'], ['level', 'simple']]
 
-# board.writeFzpz(fzpzFileName)
+miPro.createFzp(fileNameRoot + 'ModuleID', '0.12.34', meta, tags, properties)
+
+# create the combined .fzpz file:
+miPro.writeFzpz()

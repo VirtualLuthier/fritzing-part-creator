@@ -1,6 +1,31 @@
+'''
+	This file tries to create a fritzing part representing an breadboard which 
+	is combined by 2 normal breadboards. Such a breadboard is needed e.g.
+	for a ESP32 board, which needs more space between the both row clusters
+
+	It does it by using the functionality inside of fritzing.FritzingParts
+	It creates the necessary .svg files, the .fzp file and the combination of those,
+	the .fzpf file
+'''
+
+
 import os
 from fritzing.FritzingParts import FritzingBreadBoard
 
+# folder handling
+
+ownFolder = os.path.dirname(os.path.abspath(__file__))
+
+if not os.path.isdir(ownFolder + '/generated'):
+	os.mkdir(ownFolder + '/generated')
+
+fileNameRoot = 'BroadBreadBoard'		# very important
+outFolder = ownFolder + '/generated/' + fileNameRoot
+if not os.path.isdir(outFolder):
+	os.mkdir(outFolder)
+
+
+# creating the breadboard
 
 numPins = 63
 pinDist = 0.1	# use 2.54, if you use mm; use 0.1, if you use in(ch)
@@ -9,20 +34,7 @@ width = (numPins + 3) * pinDist
 height = 27 * pinDist
 left = pinDist
 
-ownFolder = os.path.dirname(os.path.abspath(__file__))
-fileNameRoot = 'BroadBreadBoard'
-
-if not os.path.isdir(ownFolder + '/generated'):
-	os.mkdir(ownFolder + '/generated')
-
-outFolder = ownFolder + '/generated/' + fileNameRoot
-
-mainSvgName = fileNameRoot + 'Main.svg'
-iconSvgName = fileNameRoot + 'Icon.svg'
-fzpFileName = fileNameRoot + '.fzp'
-fzpzFileName = fileNameRoot + '.fzpz'
-
-board = FritzingBreadBoard ('in', outFolder, width, height, numPins, pinDist)
+board = FritzingBreadBoard ('in', outFolder, fileNameRoot, width, height, numPins, pinDist)
 
 y = pinDist
 y = board.add2OuterRows('ZY', left, y)
@@ -31,7 +43,9 @@ y = board.add2OuterRows('XW', left, y)
 y = board.addInnerRows('EDCBA', left, y, True, True)
 board.add2OuterRows('VU', left, y)
 
-board.writeSvg(mainSvgName)
+board.writeMainSvg()
+
+board.createIconSvg('--' + str(numPins) + '--')
 
 # create the fzp file
 board.m_busGroups = [['A', 'B', 'C', 'D', 'E'], ['F', 'G', 'H', 'I', 'J']]
@@ -46,10 +60,6 @@ meta = {
 }
 tags = ['breadboard']
 properties = [['family', 'Breadboard'], ['size', 'broad']]
-viewFiles = ['icon/' + iconSvgName, 'breadboard/' + mainSvgName]
-board.createFzp(fileNameRoot + 'ModuleID', '0.12.34', meta, tags, properties, viewFiles)
-board.writeFzp(fzpFileName)
+board.createFzp(fileNameRoot + 'ModuleID', '0.12.34', meta, tags, properties)
 
-board.createIconSvg(iconSvgName, '--' + str(numPins) + '--')
-
-board.writeFzpz(fzpzFileName)
+board.writeFzpz()

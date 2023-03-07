@@ -1,3 +1,4 @@
-generated/
+*.svg
+*.fzp
 templateFiles/
 __pycache__/

@@ -1,11 +1,17 @@
 '''
-	Can create a fritzing breadboard via api.
-	Creates
-	- breadboard svg
-	- breadboard icon svg
-	- breadboard fzp
-
-
+	Can create a fritzing 
+	- breadboard, or
+	- a microcontroller like an arduino
+	by using an API.
+	Tries to use the mminimal input to create all
+	needed files
+	It values clarity higher than beauty. So it does not 
+	use image backgrounds, but shows more text.
+	One reason for implementing it was the fact, that fritzing seems to have 
+	a problem with coordinates. My svg files always have the real (mm or in)
+	coordinates.
+	In general the icon file must be drawn by the caller (breadboards have some own
+	icon functionality)
 '''
 '''
 	For pinouts see e.g. https://docs.arduino.cc/hardware/micro
@@ -18,8 +24,15 @@ from xml.dom import minidom
 from zipfile import ZipFile, ZIP_DEFLATED
 
 
+########################################################################
+########################################################################
+
+
 
 class Location:
+	'''
+		The location of a pin on the part
+	'''
 	def __init__(self, x, y, name):
 		self.m_x = self.round(x)
 		self.m_y = self.round(y)
@@ -27,9 +40,7 @@ class Location:
 
 
 	def dump(self):
-		#print(str(round(self.m_x, 3)) + ', ' + str(round(self.m_y, 3)))
 		print(str(self.m_x) + ', ' + str(self.m_y))
-
 
 
 	def round(self, num):
@@ -41,14 +52,25 @@ class Location:
 
 
 class MicroPin(Location):
-	def __init__(self, name, position=None):
+	'''
+		This is a location that can handle a position on the schematic view
+		or a reference to another pin (e.g. GND or RESET).
+		- Position r5 means e.g. on the right side at the 5th grid point
+		- Position oGND means, is represented by the pin with name "GND"
+	'''
+	def __init__(self, name, position):
 		super().__init__(-1, -1, name)
 		self.m_schemLoc = None
 		self.m_schemPos = None
 		if position is not None:
 			self.m_schemLoc = position[0]
 			numString = position[1:]
-			self.m_schemPos = int(numString)
+			if self.m_schemLoc == 'o':
+				self.m_schemPos = numString		# id of used other pin
+			else:
+				self.m_schemPos = int(numString)
+		elif name is not None:
+			raise Exception('schematic position needed for pin: ' + name)
 
 
 
@@ -56,6 +78,9 @@ class MicroPin(Location):
 ##############################################################
 
 class LocationList:
+	'''
+		A list of locations
+	'''
 
 
 	def __init__(self, name, x, y, dx, dy, num):
@@ -94,14 +119,20 @@ class LocationList:
 
 
 class FritzingPart:
-	s_roundingSize = 3
+	'''
+		Contains the common functionality of
+		- Breadboard generator and
+		- MicroprocessorGenerator
+	'''
+	# some static common settings
+	s_roundingSize = 3		# for rounding of coordinates
 	s_fontFamily = 'DroidSans'
-	s_fontSize = 1.62	# for mm
-	s_usedFontSize = 0
-	s_textFill = '#202020'
-	s_scaleFactor = 1	# for mm
+	s_fontSize = 1.62		# for mm
+	s_usedFontSize = 0		# will be calculated
+	s_textFill = '#000000'	# '#202020'
+	s_scaleFactor = 1		# for mm, recalculated for in
 
-	# describes the first socket svg path for mm(usage c<3 points>c<3 points>)
+	# describes the first socket svg path for mm(usage m<1 point>c<3 points>c<3 points>)
 	# will be recalculated for in
 	s_socketRestPartMM1 = [
 		-0.844, 0,											# first m
@@ -109,7 +140,7 @@ class FritzingPart:
 		0.466, 0,     0.844, 0.377,     0.844, 0.844 		# 2nd c
 	]
 
-	# describes the 2nd socket svg path for mm (usage c<3 points>c<3 points>)
+	# describes the 2nd socket svg path for mm (usage m<1 point>c<3 points>c<3 points>)
 	# will be recalculated for in
 	s_socketRestPartMM2 = [
 		0.844, 0,											# first m
@@ -117,11 +148,15 @@ class FritzingPart:
 		-0.466, 0,    -0.844, -0.377,   -0.844, -0.844 		# 2nd c
 	]
 
-
 	s_femaleSocketRestPath1 = ''		# will be set according to mm or in
 	s_femaleSocketRestPath2 = ''		# will be set according to mm or in
 
-	def __init__(self, m_mmOrInch, folder, width, height, distX, distY=None):
+	def __init__(self, m_mmOrInch, folder, filenameRoot, width, height, distX, distY=None):
+		'''
+			mmOrInch:		mm or in
+			folder:			where to output files
+			filenameRoot:	used to create all output file names
+		'''
 		m_mmOrInch = 'in' if m_mmOrInch == 'inch' else m_mmOrInch
 		if not m_mmOrInch in ['mm', 'in']:
 			raise Exception('first Argument must be mm or in')
@@ -131,27 +166,24 @@ class FritzingPart:
 		self.m_outFolder = folder
 		if not os.path.exists(folder):
 			os.mkdir(folder)
+		self.m_filenameRoot = filenameRoot
 
-		self.m_locationLists = dict()		# name => LocationList
-		self.m_width = self.round(width)	# in mm
-		self.m_height = self.round(height)	# in mm
-		self.m_distX = distX				# distance horizontally
+		self.m_locationLists = dict()		# dict name => LocationList
+		self.m_width = self.round(width)	# in mm or in
+		self.m_height = self.round(height)	# in mm or in
+		self.m_distX = distX				# pin distance horizontally
 		if distY is None:
 			distY = distX
 		self.m_distY = distY
-		self.m_svgRoot = None				# xml node
+
+		self.m_svgRoot = None				# xml node, used for all svg files
 		self.m_mainNode = None				# main group in svg root
 
 		# the fpz stuff
-		
-		self.m_fzpRoot = None
+		self.m_fzpBuses = []
+		self.m_fzpRoot = None				# xml root node
 		self.m_fzpConnectors = None
-		self.m_fzpBuses = None
-
-		# other file names
-		self.m_fzpFileName = None
-		self.m_mainSvgFileName = None
-		self.m_iconFileName = None
+		self.m_fzpBusesNode = None			# xml buses man node
 
 
 	@classmethod
@@ -172,7 +204,8 @@ class FritzingPart:
 	@classmethod
 	def adaptPath(cls, numbers, types, scale):
 		'''
-			scale the coodinates in numbers, scale them and combine them to a path, using types
+			scale the coodinates in numbers, scale them and combine them to a path, using types as path directives
+			Can handle most everything except arcs (which have values that must not be scaled)
 		'''
 		newNumbers = [cls.round(x * scale) for x in numbers]
 		ret = ''
@@ -197,18 +230,35 @@ class FritzingPart:
 
 	@classmethod
 	def getCoordsString(cls, numbers, start, numOfCoords):
+		'''
+			build a string using the coords from start in array numbers
+		'''
 		ret = ''
-		
 		for ii in range(numOfCoords):
-			#print('start + ii = ' + str(start + ii))
 			ret += str(numbers[start + ii]) + ','
-		ret = ret[:-1]
+		ret = ret[:-1]		# remove last trailing comma
 		return ret
 
 
+	def getFullPathFor(self, postfix):
+		'''
+			return the full path for this postfix
+		'''
+		return self.m_outFolder + '/' + self.getFilenameFor(postfix)
 
-	def addLocationList(self, name, x, y, dx, dy, num):
-		theList = LocationList(name, x, y, dx, dy, num)
+
+	def getFilenameFor(self, postfix):
+		'''
+			return the bare file name for this postfix
+		'''
+		return self.m_filenameRoot + postfix
+
+
+	def addLocationList(self, name, left, top, dx, dy, num):
+		'''
+			Create a list of num locations in steps of (dx, dy) and store it under the given name
+		'''
+		theList = LocationList(name, left, top, dx, dy, num)
 		self.m_locationLists[name] = theList
 
 
@@ -223,12 +273,17 @@ class FritzingPart:
 
 
 	def initSvg(self):
+		'''
+			Create the svg node with the correct size and store it
+		'''
 		root = self.createSvgRootNode(self.m_width, self.m_height)
-		self.m_svgRoot = root
 		root.set('enable-background', 'new 0 0 ' + str(self.m_width) + ' ' + str(self.m_height))
 
 
 	def createSvgRootNode(self, width, height):
+		'''
+			Create a node with the needed svg namespace settings
+		'''
 		size = self.m_mmOrInch
 		ret = ET.Element('svg')
 		ret.set('version', '1.1')
@@ -240,7 +295,7 @@ class FritzingPart:
 		ret.set('width', str(width) + size)		# fails to show corect buses: width*1.25
 		ret.set('height', str(height) + size)
 		ret.set('viewBox', '0 0 ' + str(width) + ' ' + str(height))
-
+		self.m_svgRoot = ret
 		return ret
 
 
@@ -249,8 +304,11 @@ class FritzingPart:
 		self.addRect(sub, 0, 0, self.m_width, self.m_height, color)
 
 
-	def addRect(self, parent, x, y, w, h, color, usePrefix=False):
-		prefix = 'svg:' if usePrefix else ''
+	def addRect(self, parent, x, y, w, h, color):
+		'''
+			add a svg rect with the given parameters.
+		'''
+		#prefix = 'svg:' if useNamespace else ''
 		rect = ET.SubElement(parent, prefix + 'rect')
 		rect.set('x', str(x))
 		rect.set('y', str(y))
@@ -288,7 +346,7 @@ class FritzingPart:
 		return group
 
 
-	def addText(self, parent, text, x, y, fill=None, rotation=0, fontSize=0, fontFamily=None, anchor=None):
+	def addText(self, parent, text, x, y, fill=None, rotation=0, fontSize=0, fontFamily=None, anchor='middle'):
 		svgText = ET.SubElement(parent, 'text')
 		svgText.set('x', str(self.round(x)))
 		svgText.set('y', str(self.round(y)))
@@ -302,8 +360,6 @@ class FritzingPart:
 		fontSize = fontSize if fontSize > 0 else self.s_usedFontSize
 		svgText.set('font-size', str(fontSize))
 
-		if anchor is None:
-			anchor = 'middle'
 		svgText.set('text-anchor', anchor)
 		svgText.text = text
 		return text
@@ -322,7 +378,13 @@ class FritzingPart:
 		return svgLine
 
 
-	def createFzp(self, moduleId, fritzingVersion, metaDict, tags, properties, viewFiles):
+	def createFzp(self, moduleId, fritzingVersion, metaDict, tags, properties):
+		'''
+			Create fzp file
+			- first set metadata
+			- create the connectors
+			- create buses
+		'''
 		module = ET.Element('module')
 		module.set('moduleId', moduleId)
 		module.set('fritzingVersion', fritzingVersion)
@@ -338,35 +400,33 @@ class FritzingPart:
 			nd = self.addSimpleNode(propertiesNode, 'property', property[1])
 			nd.set('name', property[0])
 
-		self.fzpInitViews(module, viewFiles)
+		self.fzpInitAllViews(module)
 
 		self.m_fzpConnectors = ET.SubElement(module, 'connectors')
-		self.m_fzpBuses = ET.SubElement(module, 'buses')
+		self.m_fzpBusesNode = ET.SubElement(module, 'buses')
 		self.m_fzpRoot = module
 		self.createFzpConnectors()
 		self.createFzpBuses()
 
+		self.writePrettyXml(self.m_fzpRoot, '.fzp')
 
-	def writePrettyXml(self, root, fName):
+
+	def writePrettyXml(self, root, postfix):
+		'''
+			write the wanted xml file nicely indented - a bit complicated, but works
+		'''
 		rough_string = ET.tostring(root, 'utf-8')
 		reparsed = minidom.parseString(rough_string)
 		pretty = reparsed.toprettyxml(indent="	", newl='\n', encoding='utf-8')
-		
-		with open(fName, 'wb') as xmlFile:
+		with open(self.getFullPathFor(postfix), 'wb') as xmlFile:
 			xmlFile.write(pretty)
 
 
-	def writeFzp(self, fNameRoot):
+	def addBusNode(self, id, connectors):
 		'''
-			Write a pretty-printed XML string for self.m_fzpRoot
+			Add one bus with given id and connectors list
 		'''
-		fName = self.m_outFolder + '/' + fNameRoot
-		self.m_fzpFileName = fNameRoot
-		self.writePrettyXml(self.m_fzpRoot, fName)
-
-
-	def addBus(self, id, connectors):
-		bus = ET.SubElement(self.m_fzpBuses, 'bus')
+		bus = ET.SubElement(self.m_fzpBusesNode, 'bus')
 		bus.set('id', id)
 		for conn in connectors:
 			nodeMember = ET.SubElement(bus, 'nodeMember')
@@ -374,6 +434,9 @@ class FritzingPart:
 
 
 	def addSimpleNode(self, parent, tag, text):
+		'''
+			Add an xml node with given tag and text
+		'''
 		ret = ET.SubElement(parent, tag)
 		ret.text = str(text)
 		return ret
@@ -381,48 +444,64 @@ class FritzingPart:
 
 	@classmethod
 	def getFzpViews(cls):
-		return ['breadboardView', 'schematicView', 'pcbView']
+		'''
+			return the possible views (without icon view)
+		'''
+		return ['breadboard', 'schematic', 'pcb']
 
 
-	def fzpInitView(self, parent, name, image, layerId):
-		view = ET.SubElement(parent, name)
+	def fzpInitOneView(self, parent, viewName, image, layerIds, srcFolder):
+		'''
+			init one view at start of the fzp file
+		'''
+		view = ET.SubElement(parent, viewName + 'View')
 		layers = ET.SubElement(view, 'layers')
-		layers.set('image', image)
-		layer = ET.SubElement(layers, 'layer')
-		layer.set('layerId', layerId)
+		layers.set('image', srcFolder + '/' + image)
+		for layerId in layerIds:
+			layer = ET.SubElement(layers, 'layer')
+			layer.set('layerId', layerId)
 
 
-	def writeFzpz(self, fNameRoot):
-		folder = self.m_outFolder + '/'
-		fName = folder + fNameRoot
-		#if os.path.isfile(fName):
-		#	os.remove(fName)
+	def writeFzpz(self):
+		'''
+			Write the zipped combination file for installation of the part
+		'''
+		fName = self.getFullPathFor('.fzpz')
 		with ZipFile(fName, 'w') as myZip:
-			self.writeZippedFile(myZip, 'svg.breadboard', self.m_mainSvgFileName)
-			self.writeZippedFile(myZip, 'svg.icon', self.m_iconFileName)
-			self.writeZippedFile(myZip, 'part', self.m_fzpFileName)
+			self.writeZippedFile(myZip, 'svg.breadboard.', 'Main.svg')
+			self.writeZippedFile(myZip, 'svg.icon.', 'Icon.svg')
+			self.writeZippedFile(myZip, 'svg.schematic.', 'Schematic.svg')
+			self.writeZippedFile(myZip, 'svg.pcb.', 'Pcb.svg')
+			self.writeZippedFile(myZip, 'part.', '.fzp')
 
 
-	def writeZippedFile(self, zipFile, prolog, fileToZip):
-		if not fileToZip:
+	def writeZippedFile(self, zipFile, prolog, postfix):
+		'''
+			Add one compressed file the fzpz file
+		'''
+		fullName = self.getFullPathFor(postfix)
+		if not os.path.exists(fullName):
 			return
-		fullName = self.m_outFolder + '/' + fileToZip
-		destName = prolog + '.' + fileToZip
+		destName = prolog + self.m_filenameRoot + postfix
 		zipFile.write(fullName, arcname=destName, compress_type= ZIP_DEFLATED)
 
 
 	def createIconRootNode(self):
-		ret = self.createSvgRootNode(32, 32)
-		
+		'''
+			For microprocessors the application must draw its own icon file
+		'''
+		ret = self.createSvgRootNode(32, 32)	
 		return ret
 	
 
-	def writeOutIconFile(self, rootNode, fNameRoot):
-		self.m_iconFileName = self.m_outFolder + '/' + fNameRoot
-		self.writePrettyXml(rootNode, self.m_iconFileName)
+	def writeOutIconFile(self):
+		self.writePrettyXml(self.m_svgRoot, 'Icon.svg')
 
 
 	def showOneSvgSocket(self, parent, loc):
+		'''
+			Mostly useful for breadboards, but could also be used by Microprocessors
+		'''
 		id = loc.m_name + 'pin'
 		group = self.addGroup(parent, id)
 
@@ -436,32 +515,29 @@ class FritzingPart:
 		self.addPath(group, '#bfbfbf', d)
 
 		self.addCircle(group, loc.m_x, loc.m_y, self.m_pinRadius, self.m_pinRadius/ 5, '#383838', None)
-		#c = ET.SubElement(group, 'circle')
-		#c.set('cx', startX)
-		#c.set('cy', startY)
-		#c.set('r', str(self.m_pinRadius))
-		#c.set('stroke-width', str(self.round(self.m_pinRadius/ 5)))		# seems to be very necessary!!
-		#c.set('fill', '#383838')
+
+
+	def addConnectorBus(self, connectors):
+		self.m_fzpBuses.append(connectors)
+
 
 ###############################################################
 ###############################################################
 
 
 class FritzingBreadBoard (FritzingPart):
+	'''
+		A fritzing breadboard. Please see description of __init__()
+		outerRows are the rows holding anode or cathode
+		inner rows are normally (A-E) and (F-J)
+	'''
 
-	#s_socketRestPath1 = 'c0-0.466,0.377-0.844,0.844-0.844c0.466,0,0.844,0.377,0.844,0.844'
-
-	#dEnd = 'c0,1.322-1.072,2.394-2.394,2.394c-1.322,0-2.394-1.071-2.394-2.394l0,0'
-	#s_socketRestPath2 = 'c0,0.466-0.377,0.844-0.844,0.844c-0.466,0-0.844-0.377-0.844-0.844l0,0'
-
-	def __init__(self, m_mmOrInch, folder, width, height, numPins, distX, distY=None):
-
-		super().__init__(m_mmOrInch, folder, width, height, distX, distY)
+	def __init__(self, m_mmOrInch, folder, fNameRoot, width, height, numPins, distX, distY=None):
+		super().__init__(m_mmOrInch, folder, fNameRoot, width, height, distX, distY)
 		self.m_numPinsPerLine = numPins
 		self.m_pinRadius = self.round(distX * 0.15)	# recommended
-		#self.m_usedPinRadius = self.m_pinRadius
-		self.m_innerRowNames = []		# the names of my non-electrode names
-		self.m_outerRowNames = []		# the names of my elctrode rows
+		self.m_innerRowNames = []		# the names of my non-electrode rows
+		self.m_outerRowNames = []		# the names of my electrode rows
 		self.m_outerPinGroupsSize = 6	# denotes the gaps in the outer pin rows
 		self.m_numberingDiff = 5		# the grid of wanted numbers
 		self.m_numberingYValues = []	# the y values of the numbering lines
@@ -473,7 +549,7 @@ class FritzingBreadBoard (FritzingPart):
 
 	def doAllPins(self, theLambda):
 		'''
-			Iterate over all pins
+			Iterate over all pins, doing theLambda for each
 		'''
 		self.doAllOuterPins(theLambda)
 		self.doAllInnerPins(theLambda)
@@ -481,7 +557,7 @@ class FritzingBreadBoard (FritzingPart):
 
 	def doAllOuterPins(self, theLambda):
 		'''
-			Iterate over all outer row pins
+			Iterate over all outer row pins, doing theLambda for each
 		'''
 		indexList = self.getOuterRowIndices()
 		for nm in self.m_outerRowNames:
@@ -493,7 +569,7 @@ class FritzingBreadBoard (FritzingPart):
 
 	def doAllInnerPins(self, theLambda):
 		'''
-			Iterate over all inner row pins
+			Iterate over all inner row pins, doing theLambda for each
 		'''
 		indexList = self.getInnerRowIndices()
 		for nm in self.m_innerRowNames:
@@ -558,13 +634,11 @@ class FritzingBreadBoard (FritzingPart):
 		return range(1, self.m_numPinsPerLine + 1)
 
 
-	def writeSvg(self, fNameRoot):
+	def writeMainSvg(self):
 		self.m_innerRowNames = sorted(self.m_innerRowNames)
 		self.m_outerRowNames = sorted(self.m_outerRowNames)
-		fName = self.m_outFolder + '/' + fNameRoot
 		self.initSvg()
 		self.m_mainNode = self.addGroup(self.m_svgRoot, name='breadboardbreadboard')
-		#self.m_mainNode.set('transform', 'matrix(1000,0,0,1000,0,0)')
 		self.fillBackground('#d9d9d9')
 
 		self.showTexts(self.m_innerRowNames)
@@ -573,8 +647,7 @@ class FritzingBreadBoard (FritzingPart):
 		self.showNumbering()
 		self.showElectrodes()
 
-		self.writePrettyXml(self.m_svgRoot, fName)
-		self.m_mainSvgFileName = fNameRoot
+		self.writePrettyXml(self.m_svgRoot, 'Main.svg')
 
 
 	def showElectrodes(self):
@@ -617,9 +690,6 @@ class FritzingBreadBoard (FritzingPart):
 		self.doAllPins(lambda loc : self.showOneSvgSocket(sockets, loc))
 
 
-
-
-
 	def createFzpConnectors(self):
 		conns = self.m_fzpConnectors
 		conns.set('ignoreTerminalPoints', 'true')
@@ -635,7 +705,7 @@ class FritzingBreadBoard (FritzingPart):
 		self.addSimpleNode(conn, 'description', 'breadboard socket')
 		views = ET.SubElement(conn, 'views')
 		for viewName in self.getFzpViews():
-			v = ET.SubElement(views, viewName)
+			v = ET.SubElement(views, viewName + 'View')
 			p = ET.SubElement(v, 'p')
 			p.set('layer', 'breadboardbreadboard')
 			p.set('svgId', connName + 'pin')
@@ -653,25 +723,24 @@ class FritzingBreadBoard (FritzingPart):
 			locs = self.getAllLocationsOf(outerName)
 			pinIds = [locs[idx].m_name for idx in indexes]
 			id = 'o' + outerName
-			self.addBus(id, pinIds)
+			self.addBusNode(id, pinIds)
 
 		# then the inner buses
 		for busGroup in self.m_busGroups:
-			#locs = self.getAllLocationsOf(outerName)
 			id = 'i' + busGroup[0] + busGroup[-1]
 			for idx in range(self.m_numPinsPerLine):
 				pinIds = [rowName + str(idx+1) for rowName in busGroup]
-				self.addBus(id + str(idx+1), pinIds)
+				self.addBusNode(id + str(idx+1), pinIds)
 
 	
-	def fzpInitViews(self, module, viewFiles):
+	def fzpInitAllViews(self, module):
 		views = ET.SubElement(module, 'views')
-		self.fzpInitView(views, 'iconView', viewFiles[0], 'icon')
+		self.fzpInitOneView(views, 'icon', self.getFilenameFor('Icon.svg'), ['icon'], 'icon')
 		for viewName in self.getFzpViews():
-			self.fzpInitView(views, viewName, viewFiles[1], 'breadboardbreadboard')
+			self.fzpInitOneView(views, viewName, self.getFilenameFor('Main.svg'), ['breadboardbreadboard'], 'breadboard')
 
 
-	def createIconSvg(self, fNameRoot, text=None):
+	def createIconSvg(self, text=None):
 		main = self.createSvgRootNode(32, 32)
 		symbols = self.addGroup(main, 'symbols')
 		size = 32.0
@@ -683,27 +752,22 @@ class FritzingBreadBoard (FritzingPart):
 			half = self.round(size * 0.5)
 			fontSize = 12
 			self.addText(symbols, text, half, half + fontSize * 0.35, fontSize=fontSize )
-			
-			
-		#self.doAllPins(lambda loc : self.writeOneIconSymbol(symbols, loc, scale, size))
-		
-		fName = self.m_outFolder + '/' + fNameRoot
-		self.m_iconFileName = fNameRoot
-		self.writePrettyXml(main, fName)
+						
+		self.writePrettyXml(main, 'Icon.svg')
 
 
 	def writeOneIconSymbol(self, parent, loc, scale, size):
 		x = self.round(loc.m_x * scale - size)
 		y = self.round(loc.m_y * scale - size)
-		self.addRect(parent, x, y, size, size, '#999', usePrefix=False)
+		self.addRect(parent, x, y, size, size, '#999')
 
 
 #############################################################
 #############################################################
 
 class FritzingMicroProcessor(FritzingPart):
-	def __init__(self, mmOrInch, outFolder, width, height, pinDistX):
-		super().__init__(mmOrInch, outFolder, width, height, pinDistX, pinDistX)
+	def __init__(self, mmOrInch, outFolder, fileNameRoot, width, height, pinDistX):
+		super().__init__(mmOrInch, outFolder, fileNameRoot, width, height, pinDistX, pinDistX)
 		self.m_pinRows = dict()
 		self.m_pinRadius = self.round(pinDistX * 0.15)	# recommended
 		self.initSvg()
@@ -711,31 +775,39 @@ class FritzingMicroProcessor(FritzingPart):
 		self.m_texts = self.addGroup(self.m_svgRoot, name='texts')
 		self.m_graphics = self.addGroup(self.m_svgRoot, name='graphics')
 
-		self.m_schematicSvgFileName = None
-
 
 	def addPinRow(self, name, x,  y, distX, distY, microPins):
 		list = []
+		self.m_pinRows[name] = list
 		pX = x
 		pY = y
 		for pin in microPins:
+			name = pin.m_name
+			if name:
+				oldPin = self.findPinNamed(name)
+				if oldPin is not None:
+					raise Exception('duplicate name: ' + name)
 			pin.m_x = self.round(pX)
 			pin.m_y = self.round(pY)
 			pX += distX
 			pY += distY
 			list.append(pin)
-		self.m_pinRows[name] = list
+		
+
+	def findPinNamed(self, name):
+		for _, list in self.m_pinRows.items():
+			for pin in list:
+				if pin.m_name == name:
+					return pin
+		return None
 
 
-	def writeSvg(self, fNameRoot):
-		
-		fName = self.m_outFolder + '/' + fNameRoot
-		
-		self.m_mainSvgFileName = fNameRoot
+	def writeMainSvg(self):
+		self.fillBackground('#d0d0d0')
 
 		fontSize = self.s_usedFontSize * 0.5
 
-		for name, list in self.m_pinRows.items():
+		for _, list in self.m_pinRows.items():
 			shift = False
 			yText = list[0].m_y
 			if yText < self.m_height * 0.5:
@@ -746,92 +818,146 @@ class FritzingMicroProcessor(FritzingPart):
 				yText2 = yText1 - fontSize
 			for microPin in list:
 				if microPin.m_name is not None:
-					self.showOneSvgSocket(self.m_mainNode, microPin)
+					self.showOneMicroSocket(self.m_mainNode, microPin)
 					yText = yText2 if shift else yText1
 					self.addText(self.m_texts, microPin.m_name, microPin.m_x, yText, fontSize=fontSize)
 					shift = not shift
 
 
-		self.writePrettyXml(self.m_svgRoot, fName)
+		self.writePrettyXml(self.m_svgRoot, 'Main.svg')
+
+
+	def showOneMicroSocket(self, parent, microPin):
+		id = microPin.m_name + 'pin'
+		circle = self.addCircle(parent, microPin.m_x, microPin.m_y, self.m_pinRadius, self.m_pinRadius/ 5, '#383838', None)
+		circle.set('id', id)
+		return circle
 
 
 
-	def writeSchematicSvg(self, fNameRoot, numWidth, numHeight, outer):
-		fName = self.m_outFolder + '/' + fNameRoot
-		self.m_schematicSvgFileName = fNameRoot
+	def getSchematicOtherReferences(self):
+		'''
+			return a dict with e.g. RESET => [RESET_2, RESET_3], GND => [GND_2]
+			also add the found buses
+		'''
+		ret = dict()
+		for _,list in self.m_pinRows.items():
+			for microPin in list:
+				loc = microPin.m_schemLoc
+				if loc == 'o':
+					# a reference
+					pos = microPin.m_schemPos
+					if not pos in ret.keys():
+						# a new other referenced pin
+						other = self.findPinNamed(pos)
+						if other.m_schemLoc == 'o':
+							raise Exception('illegal double other reference: ' + pos)
+						ret[pos] = []
+					ret[pos].append(microPin.m_name)
+		# now add the according buses (if not yet present):
+		for name, list in ret.items():
+			foundBus = None
+			for bus in self.m_fzpBuses:
+				if name in bus:
+					foundBus = bus
+					break
+			if foundBus is None:
+				foundBus = [name]
+				self.m_fzpBuses.append(foundBus)
+			for listItem in list:
+				if not listItem in foundBus:
+					foundBus.append(listItem)
+		return ret
 
+
+	def writeSchematicSvg(self, numWidth, numHeight, outer):
+		
 		width = numWidth * self.m_distX + 2*outer
 		height = numHeight * self.m_distY + 2*outer
 		svg = self.createSvgRootNode(width, height)
 		schematic = self.addGroup(svg, 'schematic')
-		outerRect = self.addRect(schematic, outer, outer, width-2*outer, height-2*outer, '#FFFFFF')
-		outerRect.set('class', 'interior rect')
-		outerRect.set('stroke', '#000000' )
+		innerRect = self.addRect(schematic, outer, outer, width-2*outer, height-2*outer, '#FFFFFF')
+		innerRect.set('class', 'interior rect')
+		innerRect.set('stroke', '#000000' )
 		lineStrokeWidth = 0.1 * self.s_scaleFactor
-		outerRect.set('stroke-width', str(2 * lineStrokeWidth))
+		innerRect.set('stroke-width', str(2 * lineStrokeWidth))
 		fontSize = self.m_distY * 0.5
 		rectRadius = self.m_distX * 0.2
 
+		schematicOtherReferences = self.getSchematicOtherReferences()
 		for _,list in self.m_pinRows.items():
 			for microPin in list:
-				if microPin.m_name is not None:
-					loc = microPin.m_schemLoc
-					if loc is None:
-						continue
-					pos = microPin.m_schemPos
-					if loc == 'l':
-						startX = 0
-						stopX = outer
-						startY = self.m_distY * pos + outer
-						stopY = startY
-						textX = stopX + 2*lineStrokeWidth
-						textY = stopY + fontSize*0.35
-						anchor = 'start'
-					elif loc == 'r':
-						startX = width
-						stopX = width - outer
-						startY = self.m_distY * pos + outer
-						stopY = startY
-						textX = stopX - 2*lineStrokeWidth
-						textY = stopY + fontSize*0.35
-						anchor = 'end'
-					elif loc == 't':
-						startX = self.m_distX * pos + outer
-						stopX = startX
-						startY = 0
-						stopY = outer
-						textX = startX
-						textY = stopY + fontSize
-						anchor = 'middle'
-					elif loc == 'b':
-						startX = self.m_distX * pos + outer
-						stopX = startX
-						startY = height
-						stopY = height - outer
-						textX = startX
-						textY = stopY - fontSize
-						anchor = 'middle'
-					
-					self.addLine(schematic, startX, startY, stopX, stopY, '#000000', lineStrokeWidth, id=microPin.m_name + 'pin')
-					self.addText(schematic, microPin.m_name, textX, textY, fontSize=fontSize, anchor=anchor)
-					rect = self.addRect(schematic, startX - rectRadius, startY - rectRadius, 2*rectRadius, 2*rectRadius, '#ff0000')
-					rect.set('id', microPin.m_name + 'terminal')
+				name = microPin.m_name
+				if name is None:
+					continue
+				loc = microPin.m_schemLoc
+				if loc != 'o':
+					if name in schematicOtherReferences.keys():
+						others = schematicOtherReferences[name]
+						for otherName in others:
+							self.outputOneSchematicPin(schematic, microPin, otherName, outer, width, height, lineStrokeWidth, fontSize, rectRadius)
+					self.outputOneSchematicPin(schematic, microPin, name, outer, width, height, lineStrokeWidth, fontSize, rectRadius * 2)
+
+		self.writePrettyXml(svg, 'Schematic.svg')
 
 
-		self.writePrettyXml(svg, fName)
-
-
-	def writePcbSvg(self, fNameRoot):
-		fName = self.m_outFolder + '/' + fNameRoot
-		self.m_schematicSvgFileName = fNameRoot
-
-		svg = self.createSvgRootNode(self.m_width, self.m_height)
-		group = self.addGroup(svg)
-		texts = self.addGroup(svg)
+	def outputOneSchematicPin(self, parent, microPin, pinRoot, outer, width, height, lineStrokeWidth, fontSize, rectRadius):
+		pos = microPin.m_schemPos
+		loc = microPin.m_schemLoc
+		if loc == 'l':
+			startX = 0
+			stopX = outer
+			startY = self.m_distY * pos + outer
+			stopY = startY
+			textX = stopX + 2*lineStrokeWidth
+			textY = stopY + fontSize*0.35
+			anchor = 'start'
+		elif loc == 'r':
+			startX = width
+			stopX = width - outer
+			startY = self.m_distY * pos + outer
+			stopY = startY
+			textX = stopX - 2*lineStrokeWidth
+			textY = stopY + fontSize*0.35
+			anchor = 'end'
+		elif loc == 't':
+			startX = self.m_distX * pos + outer
+			stopX = startX
+			startY = 0
+			stopY = outer
+			textX = startX
+			textY = stopY + fontSize
+			anchor = 'middle'
+		elif loc == 'b':
+			startX = self.m_distX * pos + outer
+			stopX = startX
+			startY = height
+			stopY = height - outer
+			textX = startX
+			textY = stopY - fontSize
+			anchor = 'middle'
+		else:
+			raise Exception('illegal schema position given: ' + loc + pos)
 		
-		color = '#9a916c'
-		rad = 0.61
-		strokeWidth = 0.33
+		self.addLine(parent, startX, startY, stopX, stopY, '#000000', lineStrokeWidth, id=pinRoot + 'pin')
+		self.addText(parent, microPin.m_name, textX, textY, fontSize=fontSize, anchor=anchor)
+		rect = self.addRect(parent, startX - rectRadius, startY - rectRadius, 2*rectRadius, 2*rectRadius, 'none')
+		rect.set('id', pinRoot + 'terminal')
+		rect.set('stroke-width', '0')
+		rect.set('stroke', 'none')
+
+
+	def writePcbSvg(self):
+		svg = self.createSvgRootNode(self.m_width, self.m_height)
+		silkscreen = self.addGroup(svg, 'silkscreen')
+		rect = self.addRect(silkscreen, 0, 0, self.m_width, self.m_height, 'none')
+		rect.set('stroke', '#000000')
+		rect.set('stroke-width', str(self.round(self.s_scaleFactor * 0.1)))
+		copper0 = self.addGroup(svg, 'copper0')
+				
+		copper0Color = '#9a916c'
+		rad = 0.619 * self.s_scaleFactor
+		strokeWidth = 0.3379 * self.s_scaleFactor
 		fontSize = self.s_usedFontSize * 0.5
 		shift = False
 
@@ -847,11 +973,74 @@ class FritzingMicroProcessor(FritzingPart):
 			for microPin in list:
 				if microPin.m_name is not None:
 					#addCircle(self, parent, cx, cy, r, strokeWidth, fill, stroke):
-					circle = self.addCircle(group, microPin.m_x, microPin.m_y, rad, strokeWidth, 'none', color)
+					circle = self.addCircle(copper0, microPin.m_x, microPin.m_y, rad, strokeWidth, 'none', copper0Color)
 					circle.set('id', microPin.m_name + 'pad')
 					circle.set('connectorname', microPin.m_name)
 					yText = yText2 if shift else yText1
-					self.addText(texts, microPin.m_name, microPin.m_x, yText, fontSize=fontSize)
+					self.addText(silkscreen, microPin.m_name, microPin.m_x, yText, fontSize=fontSize)
 					shift = not shift
 
-		self.writePrettyXml(svg, fName)
+		self.writePrettyXml(svg, 'Pcb.svg')
+
+
+
+	def fzpInitAllViews(self, module):
+		views = ET.SubElement(module, 'views')
+		self.fzpInitOneView(views, 'icon', self.getFilenameFor('Icon.svg'), ['icon'], 'icon')
+		#for viewName in self.getFzpViews():
+		self.fzpInitOneView(views, 'breadboard', self.getFilenameFor('Main.svg'), ['breadboard'], 'breadboard')
+		self.fzpInitOneView(views, 'schematic', self.getFilenameFor('Schematic.svg'), ['schematic'], 'schematic')
+		self.fzpInitOneView(views, 'pcb', self.getFilenameFor('Pcb.svg'), ['copper1', 'silkscreen', 'copper0'], 'pcb')
+
+
+	def createFzpConnectors(self):
+		connectors = self.m_fzpConnectors
+		schematicOtherReferences = self.getSchematicOtherReferences()
+		for _,list in self.m_pinRows.items():
+			for microPin in list:
+				mainIdRoot = microPin.m_name
+				if mainIdRoot is None:
+					continue
+				
+				loc = microPin.m_schemLoc
+				if loc != 'o':					
+					if mainIdRoot in schematicOtherReferences.keys():
+						others = schematicOtherReferences[mainIdRoot]
+						for otherName in others:
+							self.createOneFzpConnector(connectors, otherName, mainIdRoot)
+				self.createOneFzpConnector(connectors, mainIdRoot, mainIdRoot)
+							
+
+	def createOneFzpConnector(self, parent, idRoot, name):
+		connector = ET.SubElement(parent, 'connector')
+		connector.set('id', 'connector' + idRoot)
+		connector.set('type', 'male')
+		connector.set('name', name)
+		desc = ET.SubElement(connector, 'description')
+		desc.text = name
+		views = ET.SubElement(connector, 'views')
+
+		view = ET.SubElement(views, 'breadboardView')
+		self.addConnectorViewLayer(view, 'breadboard', idRoot + 'pin')
+
+		view = ET.SubElement(views, 'schematicView')
+		p = self.addConnectorViewLayer(view, 'schematic', idRoot + 'pin')
+		p.set('terminalId', idRoot + 'terminal')
+
+		view = ET.SubElement(views, 'pcbView')
+		self.addConnectorViewLayer(view, 'copper0', idRoot + 'pad')
+		self.addConnectorViewLayer(view, 'copper1', idRoot + 'pad')
+
+
+	def addConnectorViewLayer(self, parent, layerName, svgId):
+		p = ET.SubElement(parent, 'p')
+		p.set('layer', layerName)
+		p.set('svgId', svgId)
+		return p
+
+
+	def createFzpBuses(self):
+		idx = 1
+		for bus in self.m_fzpBuses:
+			self.addBusNode('bus' + str(idx), ['connector' + nm for nm in bus])
+			idx += 1
