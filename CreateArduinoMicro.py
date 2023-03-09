@@ -91,7 +91,7 @@ miPro.addPinRow('lower', pinDist*1.5, pinDist*6.5, pinDist, 0, lowerPins)
 
 miPro.writeMainSvg()
 
-miPro.writeSchematicSvg(8, 23, 8)		# width, height in pin steps, outer in mm or in
+miPro.writeSchematicSvg(8, 23, 3)		# width, height, outer in pin steps
 
 miPro.writePcbSvg()
 
