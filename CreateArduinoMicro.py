@@ -5,7 +5,7 @@
 
 	It does it by using the functionality inside of fritzing.FritzingParts
 	It creates the necessary .svg files, the .fzp file and the combination of those,
-	the .fzpf file.
+	the .fzpz file.
 
 	I chose ArduinoMIcro, because I could not make the integrated one work on any breadboard.
 '''
@@ -80,8 +80,10 @@ upperPins = [
 fontSize = 4
 miPro.addText(miPro.m_texts, 'ArduinoMicro', width/2, height*0.5 + fontSize*0.3, fontSize=fontSize)
 
+miPro.setMainColors('#000000', '#ffffff')	# optional, as you like (background, foreground)
+
 # the usb connector symbolically
-miPro.addRect(miPro.m_graphics, 0, 6, 5, 5, '#eeeeee')
+miPro.addRect(miPro.m_graphics, 0, 6, 5, 5, '#999999')
 fontSize = 1
 miPro.addText(miPro.m_graphics, 'USB', 3, height*0.5 + fontSize*0.3, fontSize=fontSize) # svg parent, text, x, y, fontSize
 
@@ -91,7 +93,7 @@ miPro.addPinRow('lower', pinDist*1.5, pinDist*6.5, pinDist, 0, lowerPins)
 
 miPro.writeMainSvg()
 
-miPro.writeSchematicSvg(8, 23, 3)		# width, height, outer in pin steps
+miPro.writeSchematicSvg(8, 23, 3)		# width, height, outer - in pin steps
 
 miPro.writePcbSvg()
 

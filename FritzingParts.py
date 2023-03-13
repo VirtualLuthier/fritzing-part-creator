@@ -58,7 +58,7 @@ class MicroPin(Location):
 		- Position r5 means e.g. on the right side at the 5th grid point
 		- Position oGND means, is represented by the pin with name "GND"
 	'''
-	def __init__(self, name, position):
+	def __init__(self, name, position, pinType='male'):
 		super().__init__(-1, -1, name)
 		self.m_schemLoc = None
 		self.m_schemPos = None
@@ -71,6 +71,7 @@ class MicroPin(Location):
 				self.m_schemPos = int(numString)
 		elif name is not None:
 			raise Exception('schematic position needed for pin: ' + name)
+		self.m_pinType = pinType
 
 
 
@@ -820,6 +821,7 @@ class FritzingMicroProcessor(FritzingPart):
 		super().__init__(mmOrInch, outFolder, fileNameRoot, width, height, pinDistX, pinDistX)
 		self.m_pinRows = dict()
 		self.m_pinRadius = self.round(pinDistX * 0.15)	# recommended
+		self.m_backgroundColor = '#f0f0f0'
 
 		# initialize for breadboard view:
 		self.initSvg()
@@ -828,7 +830,15 @@ class FritzingMicroProcessor(FritzingPart):
 		self.m_graphics = self.addGroup(self.m_svgRoot, name='graphics')
 
 
-	def addPinRow(self, name, x,  y, distX, distY, microPins):
+	def setMainColors(self, backgroundColor, textColor):
+		'''
+			set background and text color for the breadboard view
+		'''
+		self.m_backgroundColor = backgroundColor
+		self.s_textFill = textColor
+
+
+	def addPinRow(self, name, x,  y, distX, distY, microPins, pinType='male'):
 		'''
 			for an example for micro pins see the CreateArduinoMicro.py
 		'''
@@ -846,6 +856,7 @@ class FritzingMicroProcessor(FritzingPart):
 			pin.m_y = self.round(pY)
 			pX += distX
 			pY += distY
+			pin.m_pinType = pinType
 			list.append(pin)
 		
 
@@ -866,7 +877,7 @@ class FritzingMicroProcessor(FritzingPart):
 			Currently no background image is supported
 			output the svg file
 		'''
-		self.fillBackground('#d0d0d0')
+		self.fillBackground(self.m_backgroundColor)
 
 		fontSize = self.s_usedFontSize * 0.5
 
@@ -941,6 +952,7 @@ class FritzingMicroProcessor(FritzingPart):
 			Create the schematic svg objects and output the file. Handle the intricate
 			case of double pins (like GND and RESET)
 		'''
+		self.s_textFill = '#000000'
 		outerX = outer * self.m_distX
 		outerY = outer * self.m_distY
 		width = numWidth * self.m_distX + 2*outerX
@@ -1089,17 +1101,17 @@ class FritzingMicroProcessor(FritzingPart):
 					if mainIdRoot in schematicOtherReferences.keys():
 						others = schematicOtherReferences[mainIdRoot]
 						for otherName in others:
-							self.createOneFzpConnector(connectors, otherName, mainIdRoot)
-				self.createOneFzpConnector(connectors, mainIdRoot, mainIdRoot)
+							self.createOneFzpConnector(connectors, otherName, mainIdRoot, microPin.m_pinType)
+				self.createOneFzpConnector(connectors, mainIdRoot, mainIdRoot, microPin.m_pinType)
 							
 
-	def createOneFzpConnector(self, parent, idRoot, name):
+	def createOneFzpConnector(self, parent, idRoot, name, pinType):
 		'''
 			Create the xml for one connector. idRoot and name may be different for doubly used pins
 		'''
 		connector = ET.SubElement(parent, 'connector')
 		connector.set('id', 'connector' + idRoot)
-		connector.set('type', 'male')
+		connector.set('type', pinType)
 		connector.set('name', name)
 		desc = ET.SubElement(connector, 'description')
 		desc.text = name

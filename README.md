@@ -20,15 +20,17 @@ to any breadboard.
 To build a part with this class library you have to write a small python program, using the library.
 The library will then create the needed svg, fzp and fzpz files.
 
-I tried to make the calls as simple as possible. For reference you can see the both example programs
+I tried to make the calls as simple as possible. For reference you can see the both example programs and their respective fzpz output
 
 -CreateBroadBreadBoard.py
 
 -CreateArduinoMicro.py
 
-The only dependency is
+The only 2 dependencies are
 
 - a python 3 installation (did not try it with python 2)
+
+- font-family DroidSans is used. It would help, if it is installed on your PC
 
 call: python create....py on the command line and the files are created
 
@@ -46,5 +48,7 @@ call: python create....py on the command line and the files are created
 -currently no support for background images
 
 -currently no support for vertical pin columns
+
+-currently no support for rotated texts
 
 

@@ -5,7 +5,7 @@
 
 	It does it by using the functionality inside of fritzing.FritzingParts
 	It creates the necessary .svg files, the .fzp file and the combination of those,
-	the .fzpf file
+	the .fzpz file
 '''
 
 
